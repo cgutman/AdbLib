@@ -114,6 +114,8 @@ public class AdbConnection implements Closeable {
 	 */
 	private Thread createConnectionThread()
 	{
+		@SuppressWarnings("resource")
+		final AdbConnection conn = this;
 		return new Thread(new Runnable() {
 			@Override
 			public void run() {
@@ -134,7 +136,7 @@ public class AdbConnection implements Closeable {
 						case AdbProtocol.CMD_WRTE:
 						case AdbProtocol.CMD_CLSE:
 							/* We must ignore all packets when not connected */
-							if (!connected)
+							if (!conn.connected)
 								continue;
 							
 							/* Get the stream object corresponding to the packet */
@@ -163,7 +165,7 @@ public class AdbConnection implements Closeable {
 								else if (msg.command == AdbProtocol.CMD_CLSE)
 								{
 									/* He doesn't like us anymore :-( */
-									openStreams.remove(msg.arg1);
+									conn.openStreams.remove(msg.arg1);
 									
 									/* Notify readers and writers */
 									waitingStream.notifyClose();
@@ -179,34 +181,34 @@ public class AdbConnection implements Closeable {
 							if (msg.arg0 == AdbProtocol.AUTH_TYPE_TOKEN)
 							{
 								/* This is an authentication challenge */
-								if (sentSignature)
+								if (conn.sentSignature)
 								{
 									/* We've already tried our signature, so send our public key */
 									packet = AdbProtocol.generateAuth(AdbProtocol.AUTH_TYPE_RSA_PUBLIC,
-											crypto.getAdbPublicKeyPayload());
+											conn.crypto.getAdbPublicKeyPayload());
 								}
 								else
 								{
 									/* We'll sign the token */
 									packet = AdbProtocol.generateAuth(AdbProtocol.AUTH_TYPE_SIGNATURE,
-											crypto.signAdbTokenPayload(msg.payload));
-									sentSignature = true;
+											conn.crypto.signAdbTokenPayload(msg.payload));
+									conn.sentSignature = true;
 								}
 								
 								/* Write the AUTH reply */
-								outputStream.write(packet);
-								outputStream.flush();
+								conn.outputStream.write(packet);
+								conn.outputStream.flush();
 							}
 							break;
 						
 						case AdbProtocol.CMD_CNXN:
-							synchronized (this) {
+							synchronized (conn) {
 								/* We need to store the max data size */
-								maxData = msg.arg1;
+								conn.maxData = msg.arg1;
 							
 								/* Mark us as connected and unwait anyone waiting on the connection */
-								connected = true;
-								notifyAll();
+								conn.connected = true;
+								conn.notifyAll();
 							}
 							break;
 							
@@ -223,6 +225,8 @@ public class AdbConnection implements Closeable {
 				
 				/* This thread takes care of cleaning up pending streams */
 				cleanupStreams();
+				conn.notifyAll();
+				conn.connectAttempted = false;
 			}
 		});
 	}
@@ -233,16 +237,21 @@ public class AdbConnection implements Closeable {
 	 * This routine will block if a connection is in progress.
 	 * @return The maximum data size indicated in the connect packet.
 	 * @throws InterruptedException If a connection cannot be waited on.
+	 * @throws IOException if the connection fails
 	 */
-	public int getMaxData() throws InterruptedException
+	public int getMaxData() throws InterruptedException, IOException
 	{
-		if (connectAttempted)
+		if (!connectAttempted)
 			throw new IllegalStateException("connect() must be called first");
 		
 		synchronized (this) {
 			/* Block if a connection is pending, but not yet complete */
 			if (!connected)
-				wait();	
+				wait();
+			
+			if (!connected) {
+				throw new IOException("Connection failed");
+			}
 		}
 		
 		return maxData;
@@ -264,12 +273,17 @@ public class AdbConnection implements Closeable {
 		outputStream.flush();
 		
 		/* Start the connection thread to respond to the peer */
+		connectAttempted = true;
 		connectionThread.start();
 		
 		/* Wait for the connection to go live */
 		synchronized (this) {
-			while (!connected)
+			if (!connected)
 				wait();
+			
+			if (!connected) {
+				throw new IOException("Connection failed");
+			}
 		}
 	}
 	
@@ -286,10 +300,17 @@ public class AdbConnection implements Closeable {
 	{
 		int localId = ++lastLocalId;
 		
+		if (!connectAttempted)
+			throw new IllegalStateException("connect() must be called first");
+		
 		/* Wait for the connect response */
 		synchronized (this) {
-			while (!connected)
+			if (!connected)
 				wait();
+			
+			if (!connected) {
+				throw new IOException("Connection failed");
+			}
 		}
 		
 		/* Add this stream to this list of half-open streams */
