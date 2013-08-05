@@ -224,9 +224,11 @@ public class AdbConnection implements Closeable {
 				}
 				
 				/* This thread takes care of cleaning up pending streams */
-				cleanupStreams();
-				conn.notifyAll();
-				conn.connectAttempted = false;
+				synchronized (conn) {
+					cleanupStreams();
+					conn.notifyAll();
+					conn.connectAttempted = false;
+				}
 			}
 		});
 	}
