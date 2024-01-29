@@ -135,12 +135,15 @@ public class AdbConnection implements Closeable {
 						case AdbProtocol.CMD_OKAY:
 						case AdbProtocol.CMD_WRTE:
 						case AdbProtocol.CMD_CLSE:
+						{
+							AdbStream waitingStream;
+
 							/* We must ignore all packets when not connected */
 							if (!conn.connected)
 								continue;
 							
 							/* Get the stream object corresponding to the packet */
-							AdbStream waitingStream = openStreams.get(msg.arg1);
+							waitingStream = openStreams.get(msg.arg1);
 							if (waitingStream == null)
 								continue;
 							
@@ -164,16 +167,15 @@ public class AdbConnection implements Closeable {
 								}
 								else if (msg.command == AdbProtocol.CMD_CLSE)
 								{
-									/* He doesn't like us anymore :-( */
-									conn.openStreams.remove(msg.arg1);
-									
 									/* Notify readers and writers */
 									waitingStream.notifyClose();
+
+									break;
 								}					
 							}
 
-							break;
-							
+							continue;
+						}
 						case AdbProtocol.CMD_AUTH:
 							
 							byte[] packet;
@@ -199,7 +201,7 @@ public class AdbConnection implements Closeable {
 								conn.outputStream.write(packet);
 								conn.outputStream.flush();
 							}
-							break;
+							continue;
 						
 						case AdbProtocol.CMD_CNXN:
 							synchronized (conn) {
@@ -210,22 +212,20 @@ public class AdbConnection implements Closeable {
 								conn.connected = true;
 								conn.notifyAll();
 							}
-							break;
-							
-						default:
-							/* Unrecognized packet, just drop it */
-							break;
+							continue;
 						}
+						break;
 					} catch (Exception e) {
 						/* The cleanup is taken care of by a combination of this thread
 						 * and close() */
 						break;
 					}
 				}
-				
+			}
+			public void interrupt() {
 				/* This thread takes care of cleaning up pending streams */
 				synchronized (conn) {
-					cleanupStreams();
+					conn.cleanupStreams();
 					conn.notifyAll();
 					conn.connectAttempted = false;
 				}

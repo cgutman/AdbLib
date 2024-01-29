@@ -116,11 +116,11 @@ public class AdbStream implements Closeable {
 		
 		synchronized (readQueue) {
 			/* Wait for the connection to close or data to be received */
-			while (!isClosed && (data = readQueue.poll()) == null) {
+			while (!isClosed() && (data = readQueue.poll()) == null) {
 				readQueue.wait();
 			}
 			
-			if (isClosed) {
+			if (isClosed()) {
 				throw new IOException("Stream closed");
 			}
 		}
@@ -163,10 +163,10 @@ public class AdbStream implements Closeable {
 	{
 		synchronized (this) {
 			/* Make sure we're ready for a write */
-			while (!isClosed && !writeReady.compareAndSet(true, false))
+			while (!isClosed() && !writeReady.compareAndSet(true, false))
 				wait();
 			
-			if (isClosed) {
+			if (isClosed()) {
 				throw new IOException("Stream closed");
 			}
 		}
@@ -187,7 +187,7 @@ public class AdbStream implements Closeable {
 	public void close() throws IOException {
 		synchronized (this) {
 			/* This may already be closed by the remote host */
-			if (isClosed)
+			if (isClosed())
 				return;
 			
 			/* Notify readers/writers that we've closed */
@@ -203,7 +203,7 @@ public class AdbStream implements Closeable {
 	 * Retreives whether the stream is closed or not
 	 * @return True if the stream is close, false if not
 	 */
-	public boolean isClosed() {
+	public synchronized boolean isClosed() {
 		return isClosed;
 	}
 }
